@@ -1,0 +1,29 @@
+api:
+  id: demo-api-temp
+  displayName: Demo API 2
+  path: demotemplate2
+  backendUrl: https://backend.template.demo
+
+operations:
+  - id: createAccount
+    name: Create Account
+    method: POST
+    url: /createAccount
+
+  - id: health
+    name: Health Check
+    method: GET
+    url: /health
+
+policy: |
+  <policies>
+    <inbound>
+      <base />
+      <validate-jwt header-name="Authorization">
+        <openid-config url="{{oauthURL}}" />
+      </validate-jwt>
+    </inbound>
+    <backend><base /></backend>
+    <outbound><base /></outbound>
+    <on-error><base /></on-error>
+  </policies>
