@@ -13,10 +13,10 @@ jobs:
     env:
       RESOURCE_GROUP: bridge-prod-conn-rg
       APIM_NAME: apim-bnk-bridge
-      API_ID: demo-api
-      API_DISPLAY_NAME: "Demo API"
-      API_PATH: demo
-      BACKEND_URL: https://backend.example.com
+      API_ID: demo-api-bb
+      API_DISPLAY_NAME: "Demo API BB"
+      API_PATH: bbdemoService
+      BACKEND_URL: https://pipeline.deploy.testing
 
     steps:
       # ---------------------------
@@ -127,4 +127,4 @@ jobs:
       # Complete
       # ---------------------------
       - name: Complete
-        run: echo "✅ APIM deployment completed successfully"
+        run: echo "APIM deployment completed successfully"
