@@ -1,0 +1,123 @@
+name: Deploy APIM API
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      RESOURCE_GROUP: bridge-prod-conn-rg
+      APIM_NAME: apim-bnk-bridge
+      API_ID: demo-api
+      API_DISPLAY_NAME: "Demo API"
+      API_PATH: demo
+      BACKEND_URL: https://backend.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ---------------------------
+      # Azure Login
+      # ---------------------------
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set subscription
+        run: az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ---------------------------
+      # Create / Update API
+      # ---------------------------
+      - name: Create or Update API
+        run: |
+          if az apim api show \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID > /dev/null 2>&1; then
+            echo "API exists → updating backend"
+            az apim api update \
+              --resource-group $RESOURCE_GROUP \
+              --service-name $APIM_NAME \
+              --api-id $API_ID \
+              --service-url $BACKEND_URL
+          else
+            echo "Creating API..."
+            az apim api create \
+              --resource-group $RESOURCE_GROUP \
+              --service-name $APIM_NAME \
+              --api-id $API_ID \
+              --display-name "$API_DISPLAY_NAME" \
+              --path $API_PATH \
+              --protocols https \
+              --service-url $BACKEND_URL
+          fi
+
+      # ---------------------------
+      # Create Operations
+      # ---------------------------
+      - name: Create operations
+        run: |
+          az apim api operation create \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID \
+            --operation-id createAccount \
+            --display-name "Create Account" \
+            --method POST \
+            --url-template /createAccount || echo "exists"
+
+          az apim api operation create \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID \
+            --operation-id health \
+            --display-name "Health Check" \
+            --method GET \
+            --url-template /health || echo "exists"
+
+      # ---------------------------
+      # Apply Policy
+      # ---------------------------
+      - name: Apply API policy
+        run: |
+          cat <<EOF > policy.xml
+          <policies>
+            <inbound>
+              <base />
+              <validate-jwt header-name="Authorization"
+                            failed-validation-httpcode="401"
+                            failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
+                <openid-config url="{{oauthURL}}" />
+              </validate-jwt>
+            </inbound>
+            <backend>
+              <base />
+            </backend>
+            <outbound>
+              <base />
+            </outbound>
+            <on-error>
+              <base />
+            </on-error>
+          </policies>
+          EOF
+
+          az apim api policy apply \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID \
+            --xml-file policy.xml
+
+      # ---------------------------
+      # Done
+      # ---------------------------
+      - name: Complete
+        run: echo "✅ APIM deployment completed"
