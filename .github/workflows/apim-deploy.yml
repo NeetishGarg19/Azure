@@ -24,12 +24,12 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------
-      # Install tools
+      # Install tools 
       # ---------------------------
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get install -y jq libxml2-utils
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
           yq --version
@@ -96,6 +96,8 @@ jobs:
           FILE="${{ github.event.inputs.config_file }}"
           COUNT=$(yq '.operations | length' $FILE)
 
+          echo "Total operations: $COUNT"
+
           for ((i=0;i<COUNT;i++)); do
             ID=$(yq -r ".operations[$i].id" $FILE)
             NAME=$(yq -r ".operations[$i].name" $FILE)
@@ -123,14 +125,14 @@ jobs:
 
           echo "Creating policy.xml..."
 
-          # IMPORTANT: -r ensures RAW XML (no quotes)
+          # Extract RAW XML
           yq -r '.policy' $FILE > policy.xml
 
           echo "----- POLICY -----"
           cat policy.xml
           echo "------------------"
 
-          # VALIDATION (fail early if invalid XML)
+          # Validate XML (now works)
           xmllint --noout policy.xml
 
           echo "Applying policy..."
@@ -142,7 +144,7 @@ jobs:
             --xml-file policy.xml
 
       # ---------------------------
-      # Done
+      # Complete
       # ---------------------------
       - name: Complete
         run: echo "APIM deployment completed successfully"
