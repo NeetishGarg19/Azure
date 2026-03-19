@@ -1,10 +1,12 @@
 name: Deploy APIM API QA
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      config_file:
+        description: "Path to API config file"
+        required: true
+        default: "apis/demo-api.yaml"
 
 jobs:
   deploy:
@@ -13,21 +15,16 @@ jobs:
     env:
       RESOURCE_GROUP: bridge-prod-conn-rg
       APIM_NAME: apim-bnk-bridge
-      API_ID: demo-api-bb
-      API_DISPLAY_NAME: "Demo API BB"
-      API_PATH: bbdemoService
-      BACKEND_URL: https://pipeline.deploy.testing
 
     steps:
-      # ---------------------------
-      # Checkout
-      # ---------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ---------------------------
-      # Azure Login
-      # ---------------------------
+      - name: Install yq (YAML parser)
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -37,94 +34,70 @@ jobs:
         run: az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # ---------------------------
-      # Create / Update API
+      # Read Config
       # ---------------------------
-      - name: Create or Update API
+      - name: Read config
+        id: config
         run: |
-          if az apim api show \
-            --resource-group $RESOURCE_GROUP \
-            --service-name $APIM_NAME \
-            --api-id $API_ID > /dev/null 2>&1; then
-            echo "API exists → updating"
-            az apim api update \
-              --resource-group $RESOURCE_GROUP \
-              --service-name $APIM_NAME \
-              --api-id $API_ID \
-              --service-url $BACKEND_URL
-          else
-            echo "Creating API..."
-            az apim api create \
-              --resource-group $RESOURCE_GROUP \
-              --service-name $APIM_NAME \
-              --api-id $API_ID \
-              --display-name "$API_DISPLAY_NAME" \
-              --path $API_PATH \
-              --protocols https \
-              --service-url $BACKEND_URL
-          fi
+          FILE="${{ github.event.inputs.config_file }}"
+
+          echo "API_ID=$(yq '.api.id' $FILE)" >> $GITHUB_ENV
+          echo "API_NAME=$(yq '.api.displayName' $FILE)" >> $GITHUB_ENV
+          echo "API_PATH=$(yq '.api.path' $FILE)" >> $GITHUB_ENV
+          echo "BACKEND_URL=$(yq '.api.backendUrl' $FILE)" >> $GITHUB_ENV
 
       # ---------------------------
-      # Create Operations
+      # Create API
+      # ---------------------------
+      - name: Create API
+        run: |
+          az apim api create \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID \
+            --display-name "$API_NAME" \
+            --path $API_PATH \
+            --protocols https \
+            --service-url $BACKEND_URL || echo "exists"
+
+      # ---------------------------
+      # Create Operations (LOOP)
       # ---------------------------
       - name: Create operations
         run: |
-          az apim api operation create \
-            --resource-group $RESOURCE_GROUP \
-            --service-name $APIM_NAME \
-            --api-id $API_ID \
-            --operation-id createAccount \
-            --display-name "Create Account" \
-            --method POST \
-            --url-template /createAccount || echo "exists"
+          FILE="${{ github.event.inputs.config_file }}"
 
-          az apim api operation create \
-            --resource-group $RESOURCE_GROUP \
-            --service-name $APIM_NAME \
-            --api-id $API_ID \
-            --operation-id health \
-            --display-name "Health Check" \
-            --method GET \
-            --url-template /health || echo "exists"
+          COUNT=$(yq '.operations | length' $FILE)
+
+          for ((i=0;i<COUNT;i++)); do
+            ID=$(yq ".operations[$i].id" $FILE)
+            NAME=$(yq ".operations[$i].name" $FILE)
+            METHOD=$(yq ".operations[$i].method" $FILE)
+            URL=$(yq ".operations[$i].url" $FILE)
+
+            echo "Creating operation: $ID"
+
+            az apim api operation create \
+              --resource-group $RESOURCE_GROUP \
+              --service-name $APIM_NAME \
+              --api-id $API_ID \
+              --operation-id $ID \
+              --display-name "$NAME" \
+              --method $METHOD \
+              --url-template $URL || echo "exists"
+          done
 
       # ---------------------------
-      # Apply Policy 
+      # Apply Policy
       # ---------------------------
-      - name: Apply API policy
+      - name: Apply policy
         run: |
-          echo "Creating policy file..."
+          FILE="${{ github.event.inputs.config_file }}"
 
-          cat <<EOF > policy.xml
-          <policies>
-            <inbound>
-              <base />
-              <validate-jwt header-name="Authorization"
-                            failed-validation-httpcode="401"
-                            failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
-                <openid-config url="{{oauthURL}}" />
-              </validate-jwt>
-            </inbound>
-            <backend>
-              <base />
-            </backend>
-            <outbound>
-              <base />
-            </outbound>
-            <on-error>
-              <base />
-            </on-error>
-          </policies>
-          EOF
-
-          echo "Applying policy..."
+          yq '.policy' $FILE > policy.xml
 
           az rest \
             --method PUT \
             --headers "Content-Type=application/vnd.ms-azure-apim.policy+xml" \
             --url "https://management.azure.com/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.ApiManagement/service/$APIM_NAME/apis/$API_ID/policies/policy?api-version=2022-08-01" \
             --body @policy.xml
-
-      # ---------------------------
-      # Complete
-      # ---------------------------
-      - name: Complete
-        run: echo "APIM deployment completed successfully"
