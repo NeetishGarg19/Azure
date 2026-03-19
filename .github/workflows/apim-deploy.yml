@@ -137,7 +137,7 @@ jobs:
           done
 
       # ---------------------------
-      # Apply Policy (FINAL FIX - CURL)
+      # Apply Policy 
       # ---------------------------
       - name: Apply policy
         run: |
@@ -167,4 +167,4 @@ jobs:
       # Done
       # ---------------------------
       - name: Complete
-        run: echo "✅ APIM deployment completed successfully"
+        run: echo "APIM deployment completed successfully"
