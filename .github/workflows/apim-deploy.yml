@@ -24,10 +24,12 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------
-      # Install yq
+      # Install tools
       # ---------------------------
-      - name: Install yq
+      - name: Install tools
         run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
           yq --version
@@ -66,12 +68,14 @@ jobs:
             --resource-group $RESOURCE_GROUP \
             --service-name $APIM_NAME \
             --api-id $API_ID > /dev/null 2>&1; then
+
             echo "API exists → updating"
             az apim api update \
               --resource-group $RESOURCE_GROUP \
               --service-name $APIM_NAME \
               --api-id $API_ID \
               --service-url $BACKEND_URL
+
           else
             echo "Creating API..."
             az apim api create \
@@ -92,8 +96,6 @@ jobs:
           FILE="${{ github.event.inputs.config_file }}"
           COUNT=$(yq '.operations | length' $FILE)
 
-          echo "Total operations: $COUNT"
-
           for ((i=0;i<COUNT;i++)); do
             ID=$(yq -r ".operations[$i].id" $FILE)
             NAME=$(yq -r ".operations[$i].name" $FILE)
@@ -113,30 +115,34 @@ jobs:
           done
 
       # ---------------------------
-      # Apply Policy (FIXED FINAL)
+      # Apply Policy 
       # ---------------------------
       - name: Apply policy
         run: |
           FILE="${{ github.event.inputs.config_file }}"
 
-          echo "Applying policy..."
+          echo "Creating policy.xml..."
 
-          # Extract raw XML
+          # IMPORTANT: -r ensures RAW XML (no quotes)
           yq -r '.policy' $FILE > policy.xml
 
-          echo "----- POLICY CONTENT -----"
+          echo "----- POLICY -----"
           cat policy.xml
-          echo "--------------------------"
+          echo "------------------"
 
-          az rest \
-            --method PUT \
-            --headers "Content-Type=application/vnd.ms-azure-apim.policy+xml" \
-            --headers "If-Match=*" \
-            --url "https://management.azure.com/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.ApiManagement/service/$APIM_NAME/apis/$API_ID/policies/policy?api-version=2022-08-01" \
-            --body @policy.xml
+          # VALIDATION (fail early if invalid XML)
+          xmllint --noout policy.xml
+
+          echo "Applying policy..."
+
+          az apim api policy apply \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID \
+            --xml-file policy.xml
 
       # ---------------------------
-      # Complete
+      # Done
       # ---------------------------
       - name: Complete
         run: echo "APIM deployment completed successfully"
