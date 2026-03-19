@@ -1,5 +1,5 @@
 api:
-  id: demo-api-temp
+  id: demo-api-temp2
   displayName: Demo API 2
   path: demotemplate2
   backendUrl: https://backend.template.demo
