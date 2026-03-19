@@ -28,9 +28,9 @@ jobs:
       # ---------------------------
       - name: Install tools
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y jq libxml2-utils
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
           yq --version
 
@@ -46,31 +46,26 @@ jobs:
         run: az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # ---------------------------
-      # Install APIM extension
-      # ---------------------------
-      - name: Install APIM extension
-        run: az extension add --name apim --upgrade
-
-      # ---------------------------
-      # Read Config + Validate
+      # Read Config (STRICT)
       # ---------------------------
       - name: Read config
         run: |
-          FILE="${{ github.event.inputs.config_file }}"
+          set -e
 
+          FILE="${{ github.event.inputs.config_file }}"
           echo "Using config file: $FILE"
 
-          # Validate file exists
+          # Validate file
           if [ ! -f "$FILE" ]; then
-            echo "❌ Config file not found!"
+            echo "❌ Config file not found"
             exit 1
           fi
 
-          # Read values
-          API_ID=$(yq -r '.api.id' "$FILE")
-          API_NAME=$(yq -r '.api.displayName' "$FILE")
-          API_PATH=$(yq -r '.api.path' "$FILE")
-          BACKEND_URL=$(yq -r '.api.backendUrl' "$FILE")
+          # Extract values
+          API_ID=$(yq -r '.api.id // ""' "$FILE")
+          API_NAME=$(yq -r '.api.displayName // ""' "$FILE")
+          API_PATH=$(yq -r '.api.path // ""' "$FILE")
+          BACKEND_URL=$(yq -r '.api.backendUrl // ""' "$FILE")
 
           # Validate values
           [ -z "$API_ID" ] && echo "❌ API_ID missing" && exit 1
@@ -78,27 +73,19 @@ jobs:
           [ -z "$API_PATH" ] && echo "❌ API_PATH missing" && exit 1
           [ -z "$BACKEND_URL" ] && echo "❌ BACKEND_URL missing" && exit 1
 
-          # Export to env
+          # Export
           echo "API_ID=$API_ID" >> $GITHUB_ENV
           echo "API_NAME=$API_NAME" >> $GITHUB_ENV
           echo "API_PATH=$API_PATH" >> $GITHUB_ENV
           echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
 
       # ---------------------------
-      # Debug (optional but useful)
-      # ---------------------------
-      - name: Debug values
-        run: |
-          echo "API_ID=$API_ID"
-          echo "API_NAME=$API_NAME"
-          echo "API_PATH=$API_PATH"
-          echo "BACKEND_URL=$BACKEND_URL"
-
-      # ---------------------------
       # Create / Update API
       # ---------------------------
       - name: Create or Update API
         run: |
+          set -e
+
           if az apim api show \
             --resource-group $RESOURCE_GROUP \
             --service-name $APIM_NAME \
@@ -126,14 +113,16 @@ jobs:
           fi
 
       # ---------------------------
-      # Create Operations
+      # Create Operations (SAFE)
       # ---------------------------
       - name: Create operations
         run: |
-          FILE="${{ github.event.inputs.config_file }}"
+          set -e
 
+          FILE="${{ github.event.inputs.config_file }}"
           COUNT=$(yq '.operations | length // 0' "$FILE")
-          echo "Total operations: $COUNT"
+
+          echo "Operations count: $COUNT"
 
           for ((i=0;i<COUNT;i++)); do
             ID=$(yq -r ".operations[$i].id" "$FILE")
@@ -149,11 +138,9 @@ jobs:
               --api-id $API_ID \
               --operation-id $ID > /dev/null 2>&1; then
 
-              echo "Operation exists → skipping: $ID"
+              echo "Already exists → skipping"
 
             else
-              echo "Creating operation: $ID"
-
               az apim api operation create \
                 --resource-group $RESOURCE_GROUP \
                 --service-name $APIM_NAME \
@@ -166,25 +153,21 @@ jobs:
           done
 
       # ---------------------------
-      # Apply Policy (FIXED)
+      # Apply Policy (PROVEN METHOD)
       # ---------------------------
       - name: Apply policy
         run: |
+          set -e
+
           FILE="${{ github.event.inputs.config_file }}"
 
-          echo "Extracting policy..."
+          # Extract clean XML
+          yq -r '.policy' "$FILE" > policy.xml
 
-          # Clean extraction
-          yq -r '.policy' "$FILE" | sed 's/^[ \t]*//' > policy.xml
-
-          echo "----- POLICY -----"
-          cat policy.xml
-          echo "------------------"
-
-          # Validate XML
+          echo "Validating XML..."
           xmllint --noout policy.xml
 
-          echo "Applying policy via REST..."
+          echo "Applying policy..."
 
           az rest \
             --method PUT \
