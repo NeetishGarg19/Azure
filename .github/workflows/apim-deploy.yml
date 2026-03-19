@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------
-      # Install tools 
+      # Install tools
       # ---------------------------
       - name: Install tools
         run: |
@@ -44,6 +44,12 @@ jobs:
 
       - name: Set subscription
         run: az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ---------------------------
+      # Install APIM extension
+      # ---------------------------
+      - name: Install APIM extension
+        run: az extension add --name apim --upgrade
 
       # ---------------------------
       # Read Config
@@ -117,7 +123,7 @@ jobs:
           done
 
       # ---------------------------
-      # Apply Policy 
+      # Apply Policy (FINAL CORRECT)
       # ---------------------------
       - name: Apply policy
         run: |
@@ -125,26 +131,31 @@ jobs:
 
           echo "Creating policy.xml..."
 
-          # Extract RAW XML
           yq -r '.policy' $FILE > policy.xml
 
           echo "----- POLICY -----"
           cat policy.xml
           echo "------------------"
 
-          # Validate XML (now works)
+          # Validate XML
           xmllint --noout policy.xml
 
           echo "Applying policy..."
 
-          az apim api policy apply \
+          az apim api policy create \
+            --resource-group $RESOURCE_GROUP \
+            --service-name $APIM_NAME \
+            --api-id $API_ID \
+            --xml-file policy.xml \
+          || \
+          az apim api policy update \
             --resource-group $RESOURCE_GROUP \
             --service-name $APIM_NAME \
             --api-id $API_ID \
             --xml-file policy.xml
 
       # ---------------------------
-      # Complete
+      # Done
       # ---------------------------
       - name: Complete
-        run: echo "APIM deployment completed successfully"
+        run: echo "✅ APIM deployment completed successfully"
