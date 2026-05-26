@@ -6,7 +6,7 @@ on:
       config_file:
         description: "Path to Service Bus config file"
         required: true
-        default: "servicebus/topic-orders.yaml"
+        default: "servicebus/topic-template.yaml"
 
 jobs:
   deploy:
