@@ -1,0 +1,7 @@
+entity:
+  type: Topic
+  name: bridge-testing-topic
+
+settings:
+  partitioning: true
+  maxSizeMB: 5120
