@@ -3,38 +3,154 @@ name: Deploy Service Bus Entity
 on:
   workflow_dispatch:
     inputs:
-      entityType:
-        description: 'Queue or Topic'
+      config_file:
+        description: "Path to Service Bus config file"
         required: true
-        type: choice
-        options:
-          - Queue
-          - Topic
-
-      entityName:
-        description: 'Entity Name'
-        required: true
+        default: "servicebus/topic-orders.yaml"
 
 jobs:
   deploy:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+
+    env:
+      RESOURCE_GROUP: rg-bnk-bridge-prod
+      NAMESPACE_NAME: BridgeServiceBus
 
     steps:
 
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      # ------------------------------------------------
+      # Checkout
+      # ------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Azure Login
-      uses: azure/login@v2
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      # ------------------------------------------------
+      # Install yq
+      # ------------------------------------------------
+      - name: Install yq
+        run: |
+          sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
 
-    - name: Run PowerShell Script
-      shell: pwsh
-      run: |
-        ./scripts/deploy-servicebus.ps1 `
-          -EntityType "${{ github.event.inputs.entityType }}" `
-          -EntityName "${{ github.event.inputs.entityName }}"
+      # ------------------------------------------------
+      # Azure Login
+      # ------------------------------------------------
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set subscription
+        run: |
+          az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ------------------------------------------------
+      # Read Config
+      # ------------------------------------------------
+      - name: Read Config
+        run: |
+          set -e
+
+          FILE="${{ github.event.inputs.config_file }}"
+
+          if [ ! -f "$FILE" ]; then
+            echo "❌ Config file not found"
+            exit 1
+          fi
+
+          ENTITY_TYPE=$(yq -r '.entity.type' "$FILE")
+          ENTITY_NAME=$(yq -r '.entity.name' "$FILE")
+          PARTITIONING=$(yq -r '.settings.partitioning' "$FILE")
+          MAX_SIZE=$(yq -r '.settings.maxSizeMB' "$FILE")
+
+          echo "ENTITY_TYPE=$ENTITY_TYPE" >> $GITHUB_ENV
+          echo "ENTITY_NAME=$ENTITY_NAME" >> $GITHUB_ENV
+          echo "PARTITIONING=$PARTITIONING" >> $GITHUB_ENV
+          echo "MAX_SIZE=$MAX_SIZE" >> $GITHUB_ENV
+
+      # ------------------------------------------------
+      # Naming Convention Validation
+      # ------------------------------------------------
+      - name: Validate Naming Convention
+        run: |
+          set -e
+
+          if [ "$ENTITY_TYPE" = "Topic" ]; then
+
+            if [[ ! "$ENTITY_NAME" =~ ^bridge-[a-z0-9-]+-topic$ ]]; then
+              echo "❌ Invalid Topic Naming Convention"
+              exit 1
+            fi
+
+          fi
+
+          if [ "$ENTITY_TYPE" = "Queue" ]; then
+
+            if [[ ! "$ENTITY_NAME" =~ ^bridge-[a-z0-9-]+-queue$ ]]; then
+              echo "❌ Invalid Queue Naming Convention"
+              exit 1
+            fi
+
+          fi
+
+      # ------------------------------------------------
+      # Create Topic
+      # ------------------------------------------------
+      - name: Create Topic
+        if: env.ENTITY_TYPE == 'Topic'
+        run: |
+          set -e
+
+          if az servicebus topic show \
+            --resource-group $RESOURCE_GROUP \
+            --namespace-name $NAMESPACE_NAME \
+            --name $ENTITY_NAME > /dev/null 2>&1; then
+
+            echo "Topic already exists"
+
+          else
+
+            az servicebus topic create \
+              --resource-group $RESOURCE_GROUP \
+              --namespace-name $NAMESPACE_NAME \
+              --name $ENTITY_NAME \
+              --enable-partitioning $PARTITIONING \
+              --max-size $MAX_SIZE
+
+            echo "✅ Topic Created"
+
+          fi
+
+      # ------------------------------------------------
+      # Create Queue
+      # ------------------------------------------------
+      - name: Create Queue
+        if: env.ENTITY_TYPE == 'Queue'
+        run: |
+          set -e
+
+          if az servicebus queue show \
+            --resource-group $RESOURCE_GROUP \
+            --namespace-name $NAMESPACE_NAME \
+            --name $ENTITY_NAME > /dev/null 2>&1; then
+
+            echo "Queue already exists"
+
+          else
+
+            az servicebus queue create \
+              --resource-group $RESOURCE_GROUP \
+              --namespace-name $NAMESPACE_NAME \
+              --name $ENTITY_NAME \
+              --enable-partitioning $PARTITIONING \
+              --max-size $MAX_SIZE
+
+            echo "✅ Queue Created"
+
+          fi
+
+      # ------------------------------------------------
+      # Complete
+      # ------------------------------------------------
+      - name: Complete
+        run: echo "Service Bus deployment completed successfully"
