@@ -1,0 +1,7 @@
+entity:
+  type: Queue
+  name: bridge-testing-queue
+
+settings:
+  partitioning: true
+  maxSizeMB: 1024
