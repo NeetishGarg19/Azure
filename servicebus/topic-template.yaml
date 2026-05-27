@@ -3,5 +3,5 @@ entity:
   name: bridge-testing-topic
 
 settings:
-  partitioning: true
+  partitioning: false
   maxSizeMB: 5120
