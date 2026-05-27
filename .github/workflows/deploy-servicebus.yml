@@ -68,31 +68,76 @@ jobs:
           echo "PARTITIONING=$PARTITIONING" >> $GITHUB_ENV
           echo "MAX_SIZE=$MAX_SIZE" >> $GITHUB_ENV
 
-      # ------------------------------------------------
+            # ------------------------------------------------
       # Naming Convention Validation
       # ------------------------------------------------
       - name: Validate Naming Convention
         run: |
           set -e
 
+          echo "Validating naming convention..."
+
+          # ================================================
+          # TOPIC VALIDATION
+          #
+          # Pattern:
+          # s-<name>-<environment>
+          #
+          # Examples:
+          # s-jira-tickets-prod
+          # s-jira-finnvera-tickets-qa
+          # s-integrator-generalsupplier-prod
+          # ================================================
+
           if [ "$ENTITY_TYPE" = "Topic" ]; then
 
-            if [[ ! "$ENTITY_NAME" =~ ^bridge-[a-z0-9-]+-topic$ ]]; then
+            if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
+
               echo "❌ Invalid Topic Naming Convention"
+
+              echo ""
+              echo "Expected format:"
+              echo "s-<name>-<environment>"
+
+              echo ""
+              echo "Examples:"
+              echo "s-jira-tickets-prod"
+              echo "s-jira-finnvera-tickets-qa"
+              echo "s-integrator-generalsupplier-prod"
+
               exit 1
             fi
 
           fi
+
+          # ================================================
+          # QUEUE VALIDATION
+          #
+          # Pattern:
+          # q-<name>-<environment>
+          # ================================================
 
           if [ "$ENTITY_TYPE" = "Queue" ]; then
 
-            if [[ ! "$ENTITY_NAME" =~ ^bridge-[a-z0-9-]+-queue$ ]]; then
+            if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
+
               echo "❌ Invalid Queue Naming Convention"
+
+              echo ""
+              echo "Expected format:"
+              echo "s-<name>-<environment>"
+
+              echo ""
+              echo "Examples:"
+              echo "s-jira-tickets-prod"
+              echo "s-finnvera-tickets-qa"
+
               exit 1
             fi
 
           fi
 
+          echo "✅ Naming convention validation passed"
       # ------------------------------------------------
       # Create Topic
       # ------------------------------------------------
