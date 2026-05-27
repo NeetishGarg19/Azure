@@ -1,6 +1,6 @@
 entity:
   type: Topic
-  name: bridge-testing-topic
+  name: s-bridge-testing-qa
 
 settings:
   partitioning: false
