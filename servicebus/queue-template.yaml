@@ -1,6 +1,6 @@
 entity:
   type: Queue
-  name: bridge-testing-queue
+  name: s-testing-qa
 
 settings:
   partitioning: false
