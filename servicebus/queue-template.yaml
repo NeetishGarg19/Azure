@@ -3,5 +3,5 @@ entity:
   name: bridge-testing-queue
 
 settings:
-  partitioning: true
+  partitioning: false
   maxSizeMB: 1024
