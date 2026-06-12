@@ -1,7 +1,14 @@
 entity:
   type: Queue
-  name: s-jira-testing-tickets-qa
+  name: s-jira-teo-tickets-qa
 
 settings:
   partitioning: false
-  maxSizeMB: 1024
+  maxSizeMB: 5120
+
+authorizationRules:
+  - name: jira-teo
+    rights:
+      - Manage
+      - Send
+      - Listen
