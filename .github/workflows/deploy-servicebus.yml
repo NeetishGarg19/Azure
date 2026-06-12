@@ -64,7 +64,7 @@ jobs:
 
           PARTITIONING=$(yq -r '.settings.partitioning // false' "$FILE")
           MAX_SIZE=$(yq -r '.settings.maxSizeMB // 1024' "$FILE")
-          TTL=$(yq -r '.settings.defaultMessageTimeToLive // "P10675199DT2H48M5.4775807S"' "$FILE")
+          TTL=$(yq -r '.settings.defaultMessageTimeToLive // ""' "$FILE")
 
           echo "ENTITY_TYPE=$ENTITY_TYPE" >> $GITHUB_ENV
           echo "ENTITY_NAME=$ENTITY_NAME" >> $GITHUB_ENV
@@ -107,25 +107,42 @@ jobs:
           then
             echo "Topic exists. Updating..."
 
-            az servicebus topic update \
-              --resource-group "$RESOURCE_GROUP" \
-              --namespace-name "$NAMESPACE_NAME" \
-              --name "$ENTITY_NAME" \
-              --max-size "$MAX_SIZE" \
-              --default-message-time-to-live "$TTL"
+            if [ -n "$TTL" ]; then
+              az servicebus topic update \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --max-size "$MAX_SIZE" \
+                --default-message-time-to-live "$TTL"
+            else
+              az servicebus topic update \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --max-size "$MAX_SIZE"
+            fi
 
             echo "Topic updated"
 
           else
             echo "Creating topic..."
 
-            az servicebus topic create \
-              --resource-group "$RESOURCE_GROUP" \
-              --namespace-name "$NAMESPACE_NAME" \
-              --name "$ENTITY_NAME" \
-              --enable-partitioning "$PARTITIONING" \
-              --max-size "$MAX_SIZE" \
-              --default-message-time-to-live "$TTL"
+            if [ -n "$TTL" ]; then
+              az servicebus topic create \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --enable-partitioning "$PARTITIONING" \
+                --max-size "$MAX_SIZE" \
+                --default-message-time-to-live "$TTL"
+            else
+              az servicebus topic create \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --enable-partitioning "$PARTITIONING" \
+                --max-size "$MAX_SIZE"
+            fi
 
             echo "Topic created"
           fi
@@ -231,7 +248,7 @@ jobs:
             fi
           done
 
-      # ------------------------------------------------
+            # ------------------------------------------------
       # Create or Update Queue
       # ------------------------------------------------
       - name: Create or Update Queue
@@ -246,29 +263,45 @@ jobs:
           then
             echo "Queue exists. Updating..."
 
-            az servicebus queue update \
-              --resource-group "$RESOURCE_GROUP" \
-              --namespace-name "$NAMESPACE_NAME" \
-              --name "$ENTITY_NAME" \
-              --max-size "$MAX_SIZE" \
-              --default-message-time-to-live "$TTL"
+            if [ -n "$TTL" ]; then
+              az servicebus queue update \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --max-size "$MAX_SIZE" \
+                --default-message-time-to-live "$TTL"
+            else
+              az servicebus queue update \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --max-size "$MAX_SIZE"
+            fi
 
             echo "Queue updated"
 
           else
             echo "Creating queue..."
 
-            az servicebus queue create \
-              --resource-group "$RESOURCE_GROUP" \
-              --namespace-name "$NAMESPACE_NAME" \
-              --name "$ENTITY_NAME" \
-              --enable-partitioning "$PARTITIONING" \
-              --max-size "$MAX_SIZE" \
-              --default-message-time-to-live "$TTL"
+            if [ -n "$TTL" ]; then
+              az servicebus queue create \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --enable-partitioning "$PARTITIONING" \
+                --max-size "$MAX_SIZE" \
+                --default-message-time-to-live "$TTL"
+            else
+              az servicebus queue create \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --name "$ENTITY_NAME" \
+                --enable-partitioning "$PARTITIONING" \
+                --max-size "$MAX_SIZE"
+            fi
 
             echo "Queue created"
           fi
-
       # ------------------------------------------------
       # Queue Shared Access Policies
       # ------------------------------------------------
