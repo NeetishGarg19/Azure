@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       config_file:
-        description: Path to Service Bus config file
+        description: "Path to Service Bus config file"
         required: true
-        default: servicebus/topic-template.yaml
+        default: "servicebus/topic-template.yaml"
 
 jobs:
   deploy:
@@ -17,35 +17,25 @@ jobs:
       NAMESPACE_NAME: BridgeServiceBus
 
     steps:
-      # ------------------------------------------------
-      # Checkout
-      # ------------------------------------------------
+
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ------------------------------------------------
-      # Install yq
-      # ------------------------------------------------
       - name: Install yq
         run: |
           sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
+          yq --version
 
-      # ------------------------------------------------
-      # Azure Login
-      # ------------------------------------------------
       - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Set subscription
+      - name: Set Azure Subscription
         run: |
           az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
 
-      # ------------------------------------------------
-      # Read Config
-      # ------------------------------------------------
       - name: Read Config
         run: |
           set -e
@@ -53,7 +43,7 @@ jobs:
           FILE="${{ github.event.inputs.config_file }}"
 
           if [ ! -f "$FILE" ]; then
-            echo "❌ Config file not found: $FILE"
+            echo "Config file not found: $FILE"
             exit 1
           fi
 
@@ -62,61 +52,36 @@ jobs:
           PARTITIONING=$(yq -r '.settings.partitioning' "$FILE")
           MAX_SIZE=$(yq -r '.settings.maxSizeMB' "$FILE")
 
-          SUBSCRIPTIONS=$(yq -r '.subscriptions[].name // empty' "$FILE" | paste -sd "," -)
+          echo "ENTITY_TYPE=$ENTITY_TYPE" >> $GITHUB_ENV
+          echo "ENTITY_NAME=$ENTITY_NAME" >> $GITHUB_ENV
+          echo "PARTITIONING=$PARTITIONING" >> $GITHUB_ENV
+          echo "MAX_SIZE=$MAX_SIZE" >> $GITHUB_ENV
 
-          echo "ENTITY_TYPE=$ENTITY_TYPE" >> "$GITHUB_ENV"
-          echo "ENTITY_NAME=$ENTITY_NAME" >> "$GITHUB_ENV"
-          echo "PARTITIONING=$PARTITIONING" >> "$GITHUB_ENV"
-          echo "MAX_SIZE=$MAX_SIZE" >> "$GITHUB_ENV"
-          echo "SUBSCRIPTIONS=$SUBSCRIPTIONS" >> "$GITHUB_ENV"
+          echo "Entity Type : $ENTITY_TYPE"
+          echo "Entity Name : $ENTITY_NAME"
+          echo "Partitioning: $PARTITIONING"
+          echo "Max Size    : $MAX_SIZE"
 
-          echo "Entity Type: $ENTITY_TYPE"
-          echo "Entity Name: $ENTITY_NAME"
-
-      # ------------------------------------------------
-      # Validate Naming Convention
-      # ------------------------------------------------
       - name: Validate Naming Convention
         run: |
           set -e
 
-          echo "Validating naming convention..."
-
           if [ "$ENTITY_TYPE" = "Topic" ]; then
             if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
-              echo "❌ Invalid Topic Naming Convention"
-              echo "Expected: s-<name>-<environment>"
+              echo "Invalid Topic Naming Convention"
               exit 1
             fi
           fi
 
           if [ "$ENTITY_TYPE" = "Queue" ]; then
             if [[ ! "$ENTITY_NAME" =~ ^q-[a-z0-9-]+-(qa|prod)$ ]]; then
-              echo "❌ Invalid Queue Naming Convention"
-              echo "Expected: q-<name>-<environment>"
+              echo "Invalid Queue Naming Convention"
               exit 1
             fi
           fi
 
-          if [ "$ENTITY_TYPE" = "Topic" ] && [ -n "$SUBSCRIPTIONS" ]; then
-            IFS=',' read -ra SUBS <<< "$SUBSCRIPTIONS"
+          echo "Naming validation passed"
 
-            for SUB in "${SUBS[@]}"; do
-              [ -z "$SUB" ] && continue
-
-              if [[ ! "$SUB" =~ ^sb-[a-z0-9-]+-(qa|prod)$ ]]; then
-                echo "❌ Invalid Subscription Naming Convention: $SUB"
-                echo "Expected: sb-<name>-<environment>"
-                exit 1
-              fi
-            done
-          fi
-
-          echo "✅ Naming validation passed"
-
-      # ------------------------------------------------
-      # Create Topic
-      # ------------------------------------------------
       - name: Create Topic
         if: env.ENTITY_TYPE == 'Topic'
         run: |
@@ -125,12 +90,10 @@ jobs:
           if az servicebus topic show \
             --resource-group "$RESOURCE_GROUP" \
             --namespace-name "$NAMESPACE_NAME" \
-            --name "$ENTITY_NAME" > /dev/null 2>&1; then
-
+            --name "$ENTITY_NAME" > /dev/null 2>&1
+          then
             echo "Topic already exists"
-
           else
-
             az servicebus topic create \
               --resource-group "$RESOURCE_GROUP" \
               --namespace-name "$NAMESPACE_NAME" \
@@ -138,52 +101,58 @@ jobs:
               --enable-partitioning "$PARTITIONING" \
               --max-size "$MAX_SIZE"
 
-            echo "✅ Topic created"
+            echo "Topic created"
           fi
 
-      # ------------------------------------------------
-      # Create Subscriptions
-      # ------------------------------------------------
+      - name: Debug Config
+        if: env.ENTITY_TYPE == 'Topic'
+        run: |
+          FILE="${{ github.event.inputs.config_file }}"
+
+          echo "===== FILE ====="
+          cat "$FILE"
+
+          echo "===== SUBSCRIPTIONS ====="
+          yq -r '.subscriptions[].name' "$FILE" || true
+
       - name: Create Subscriptions
         if: env.ENTITY_TYPE == 'Topic'
         run: |
           set -e
 
-          if [ -z "$SUBSCRIPTIONS" ]; then
-            echo "No subscriptions defined"
-            exit 0
-          fi
+          FILE="${{ github.event.inputs.config_file }}"
 
-          IFS=',' read -ra SUBS <<< "$SUBSCRIPTIONS"
+          if yq -e '.subscriptions' "$FILE" > /dev/null 2>&1; then
 
-          for SUB in "${SUBS[@]}"; do
-            [ -z "$SUB" ] && continue
+            while IFS= read -r SUB
+            do
+              [ -z "$SUB" ] && continue
 
-            echo "Processing subscription: $SUB"
+              echo "Processing subscription: $SUB"
 
-            if az servicebus topic subscription show \
-              --resource-group "$RESOURCE_GROUP" \
-              --namespace-name "$NAMESPACE_NAME" \
-              --topic-name "$ENTITY_NAME" \
-              --name "$SUB" > /dev/null 2>&1; then
-
-              echo "Subscription already exists: $SUB"
-
-            else
-
-              az servicebus topic subscription create \
+              if az servicebus topic subscription show \
                 --resource-group "$RESOURCE_GROUP" \
                 --namespace-name "$NAMESPACE_NAME" \
                 --topic-name "$ENTITY_NAME" \
-                --name "$SUB"
+                --name "$SUB" > /dev/null 2>&1
+              then
+                echo "Subscription already exists: $SUB"
+              else
+                az servicebus topic subscription create \
+                  --resource-group "$RESOURCE_GROUP" \
+                  --namespace-name "$NAMESPACE_NAME" \
+                  --topic-name "$ENTITY_NAME" \
+                  --name "$SUB"
 
-              echo "✅ Subscription created: $SUB"
-            fi
-          done
+                echo "Subscription created: $SUB"
+              fi
 
-      # ------------------------------------------------
-      # Create Queue
-      # ------------------------------------------------
+            done < <(yq -r '.subscriptions[].name' "$FILE")
+
+          else
+            echo "No subscriptions defined"
+          fi
+
       - name: Create Queue
         if: env.ENTITY_TYPE == 'Queue'
         run: |
@@ -192,12 +161,10 @@ jobs:
           if az servicebus queue show \
             --resource-group "$RESOURCE_GROUP" \
             --namespace-name "$NAMESPACE_NAME" \
-            --name "$ENTITY_NAME" > /dev/null 2>&1; then
-
+            --name "$ENTITY_NAME" > /dev/null 2>&1
+          then
             echo "Queue already exists"
-
           else
-
             az servicebus queue create \
               --resource-group "$RESOURCE_GROUP" \
               --namespace-name "$NAMESPACE_NAME" \
@@ -205,12 +172,9 @@ jobs:
               --enable-partitioning "$PARTITIONING" \
               --max-size "$MAX_SIZE"
 
-            echo "✅ Queue created"
+            echo "Queue created"
           fi
 
-      # ------------------------------------------------
-      # Complete
-      # ------------------------------------------------
       - name: Complete
         run: |
-          echo "✅ Service Bus deployment completed successfully"
+          echo "Service Bus deployment completed successfully"
