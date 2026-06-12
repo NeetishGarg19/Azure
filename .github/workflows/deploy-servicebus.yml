@@ -184,6 +184,52 @@ jobs:
           else
             echo "No subscriptions defined"
           fi
+     
+            # ------------------------------------------------
+      # Topic Shared Access Policies
+      # ------------------------------------------------
+      - name: Create Topic Shared Access Policies
+        if: env.ENTITY_TYPE == 'Topic'
+        run: |
+          set -e
+
+          FILE="${{ github.event.inputs.config_file }}"
+
+          if ! yq -e '.authorizationRules' "$FILE" > /dev/null 2>&1; then
+            echo "No authorization rules defined"
+            exit 0
+          fi
+
+          COUNT=$(yq '.authorizationRules | length' "$FILE")
+
+          echo "Found $COUNT authorization rules"
+
+          for ((i=0; i<COUNT; i++))
+          do
+            RULE_NAME=$(yq -r ".authorizationRules[$i].name" "$FILE")
+
+            RIGHTS=$(yq -r ".authorizationRules[$i].rights[]" "$FILE" | xargs)
+
+            echo "Processing authorization rule: $RULE_NAME"
+
+            if az servicebus topic authorization-rule show \
+              --resource-group "$RESOURCE_GROUP" \
+              --namespace-name "$NAMESPACE_NAME" \
+              --topic-name "$ENTITY_NAME" \
+              --name "$RULE_NAME" > /dev/null 2>&1
+            then
+              echo "Authorization rule already exists: $RULE_NAME"
+            else
+              az servicebus topic authorization-rule create \
+                --resource-group "$RESOURCE_GROUP" \
+                --namespace-name "$NAMESPACE_NAME" \
+                --topic-name "$ENTITY_NAME" \
+                --name "$RULE_NAME" \
+                --rights $RIGHTS
+
+              echo "Authorization rule created: $RULE_NAME"
+            fi
+          done
 
       # ------------------------------------------------
       # Create or Update Queue
