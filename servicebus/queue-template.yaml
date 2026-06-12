@@ -4,7 +4,8 @@ entity:
 
 settings:
   partitioning: false
-  maxSizeMB: 5120
+  maxSizeMB: 1024
+  defaultMessageTimeToLive: P14D
 
 authorizationRules:
   - name: jira-teo
