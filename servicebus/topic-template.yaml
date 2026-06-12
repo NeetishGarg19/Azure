@@ -9,3 +9,10 @@ settings:
 subscriptions:
   - name: sb-bridge-testing-qa
   - name: sb-bridge-audit-qa
+
+authorizationRules:
+  - name: auth
+    rights:
+      - Manage
+      - Send
+      - Listen
