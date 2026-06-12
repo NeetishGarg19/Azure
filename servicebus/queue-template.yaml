@@ -1,6 +1,6 @@
 entity:
   type: Queue
-  name: s-testing-qa
+  name: s-jira-teo-tickets-qa
 
 settings:
   partitioning: false
