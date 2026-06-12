@@ -74,7 +74,7 @@ jobs:
           fi
 
           if [ "$ENTITY_TYPE" = "Queue" ]; then
-            if [[ ! "$ENTITY_NAME" =~ ^q-[a-z0-9-]+-(qa|prod)$ ]]; then
+            if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
               echo "Invalid Queue Naming Convention"
               exit 1
             fi
