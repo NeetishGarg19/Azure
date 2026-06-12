@@ -18,15 +18,24 @@ jobs:
 
     steps:
 
+      # ------------------------------------------------
+      # Checkout
+      # ------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ------------------------------------------------
+      # Install yq
+      # ------------------------------------------------
       - name: Install yq
         run: |
           sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
           yq --version
 
+      # ------------------------------------------------
+      # Azure Login
+      # ------------------------------------------------
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -36,6 +45,9 @@ jobs:
         run: |
           az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
 
+      # ------------------------------------------------
+      # Read Config
+      # ------------------------------------------------
       - name: Read Config
         run: |
           set -e
@@ -49,40 +61,41 @@ jobs:
 
           ENTITY_TYPE=$(yq -r '.entity.type' "$FILE")
           ENTITY_NAME=$(yq -r '.entity.name' "$FILE")
-          PARTITIONING=$(yq -r '.settings.partitioning' "$FILE")
-          MAX_SIZE=$(yq -r '.settings.maxSizeMB' "$FILE")
+
+          PARTITIONING=$(yq -r '.settings.partitioning // false' "$FILE")
+          MAX_SIZE=$(yq -r '.settings.maxSizeMB // 1024' "$FILE")
+          TTL=$(yq -r '.settings.defaultMessageTimeToLive // "P10675199DT2H48M5.4775807S"' "$FILE")
 
           echo "ENTITY_TYPE=$ENTITY_TYPE" >> $GITHUB_ENV
           echo "ENTITY_NAME=$ENTITY_NAME" >> $GITHUB_ENV
           echo "PARTITIONING=$PARTITIONING" >> $GITHUB_ENV
           echo "MAX_SIZE=$MAX_SIZE" >> $GITHUB_ENV
+          echo "TTL=$TTL" >> $GITHUB_ENV
 
           echo "Entity Type : $ENTITY_TYPE"
           echo "Entity Name : $ENTITY_NAME"
           echo "Partitioning: $PARTITIONING"
           echo "Max Size    : $MAX_SIZE"
+          echo "TTL         : $TTL"
 
+      # ------------------------------------------------
+      # Validate Naming
+      # ------------------------------------------------
       - name: Validate Naming Convention
         run: |
           set -e
 
-          if [ "$ENTITY_TYPE" = "Topic" ]; then
-            if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
-              echo "Invalid Topic Naming Convention"
-              exit 1
-            fi
-          fi
-
-          if [ "$ENTITY_TYPE" = "Queue" ]; then
-            if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
-              echo "Invalid Queue Naming Convention"
-              exit 1
-            fi
+          if [[ ! "$ENTITY_NAME" =~ ^s-[a-z0-9-]+-(qa|prod)$ ]]; then
+            echo "Invalid naming convention"
+            exit 1
           fi
 
           echo "Naming validation passed"
 
-      - name: Create Topic
+      # ------------------------------------------------
+      # Create or Update Topic
+      # ------------------------------------------------
+      - name: Create or Update Topic
         if: env.ENTITY_TYPE == 'Topic'
         run: |
           set -e
@@ -92,18 +105,34 @@ jobs:
             --namespace-name "$NAMESPACE_NAME" \
             --name "$ENTITY_NAME" > /dev/null 2>&1
           then
-            echo "Topic already exists"
+            echo "Topic exists. Updating..."
+
+            az servicebus topic update \
+              --resource-group "$RESOURCE_GROUP" \
+              --namespace-name "$NAMESPACE_NAME" \
+              --name "$ENTITY_NAME" \
+              --max-size "$MAX_SIZE" \
+              --default-message-time-to-live "$TTL"
+
+            echo "Topic updated"
+
           else
+            echo "Creating topic..."
+
             az servicebus topic create \
               --resource-group "$RESOURCE_GROUP" \
               --namespace-name "$NAMESPACE_NAME" \
               --name "$ENTITY_NAME" \
               --enable-partitioning "$PARTITIONING" \
-              --max-size "$MAX_SIZE"
+              --max-size "$MAX_SIZE" \
+              --default-message-time-to-live "$TTL"
 
             echo "Topic created"
           fi
 
+      # ------------------------------------------------
+      # Debug Topic Config
+      # ------------------------------------------------
       - name: Debug Config
         if: env.ENTITY_TYPE == 'Topic'
         run: |
@@ -115,6 +144,9 @@ jobs:
           echo "===== SUBSCRIPTIONS ====="
           yq -r '.subscriptions[].name' "$FILE" || true
 
+      # ------------------------------------------------
+      # Create Topic Subscriptions
+      # ------------------------------------------------
       - name: Create Subscriptions
         if: env.ENTITY_TYPE == 'Topic'
         run: |
@@ -153,10 +185,10 @@ jobs:
             echo "No subscriptions defined"
           fi
 
-            # ------------------------------------------------
-      # Create Queue
       # ------------------------------------------------
-      - name: Create Queue
+      # Create or Update Queue
+      # ------------------------------------------------
+      - name: Create or Update Queue
         if: env.ENTITY_TYPE == 'Queue'
         run: |
           set -e
@@ -166,20 +198,33 @@ jobs:
             --namespace-name "$NAMESPACE_NAME" \
             --name "$ENTITY_NAME" > /dev/null 2>&1
           then
-            echo "Queue already exists"
+            echo "Queue exists. Updating..."
+
+            az servicebus queue update \
+              --resource-group "$RESOURCE_GROUP" \
+              --namespace-name "$NAMESPACE_NAME" \
+              --name "$ENTITY_NAME" \
+              --max-size "$MAX_SIZE" \
+              --default-message-time-to-live "$TTL"
+
+            echo "Queue updated"
+
           else
+            echo "Creating queue..."
+
             az servicebus queue create \
               --resource-group "$RESOURCE_GROUP" \
               --namespace-name "$NAMESPACE_NAME" \
               --name "$ENTITY_NAME" \
               --enable-partitioning "$PARTITIONING" \
-              --max-size "$MAX_SIZE"
+              --max-size "$MAX_SIZE" \
+              --default-message-time-to-live "$TTL"
 
             echo "Queue created"
           fi
 
       # ------------------------------------------------
-      # Create Queue Shared Access Policies
+      # Queue Shared Access Policies
       # ------------------------------------------------
       - name: Create Queue Shared Access Policies
         if: env.ENTITY_TYPE == 'Queue'
@@ -201,7 +246,7 @@ jobs:
           do
             RULE_NAME=$(yq -r ".authorizationRules[$i].name" "$FILE")
 
-            RIGHTS=$(yq -r ".authorizationRules[$i].rights[]" "$FILE")
+            RIGHTS=$(yq -r ".authorizationRules[$i].rights[]" "$FILE" | xargs)
 
             echo "Processing authorization rule: $RULE_NAME"
 
@@ -223,6 +268,32 @@ jobs:
               echo "Authorization rule created: $RULE_NAME"
             fi
           done
+
+      # ------------------------------------------------
+      # Verify Queue
+      # ------------------------------------------------
+      - name: Verify Queue Configuration
+        if: env.ENTITY_TYPE == 'Queue'
+        run: |
+          az servicebus queue show \
+            --resource-group "$RESOURCE_GROUP" \
+            --namespace-name "$NAMESPACE_NAME" \
+            --name "$ENTITY_NAME" \
+            --query "{name:name,ttl:defaultMessageTimeToLive,maxSize:maxSizeInMegabytes}" \
+            -o table
+
+      # ------------------------------------------------
+      # Verify Topic
+      # ------------------------------------------------
+      - name: Verify Topic Configuration
+        if: env.ENTITY_TYPE == 'Topic'
+        run: |
+          az servicebus topic show \
+            --resource-group "$RESOURCE_GROUP" \
+            --namespace-name "$NAMESPACE_NAME" \
+            --name "$ENTITY_NAME" \
+            --query "{name:name,ttl:defaultMessageTimeToLive,maxSize:maxSizeInMegabytes}" \
+            -o table
 
       # ------------------------------------------------
       # Complete
